@@ -44,7 +44,9 @@ SRT normally carries MPEG-TS. A matching test sender is:
 ffmpeg -re -i INPUT -c copy -f mpegts "srt://YOUR_SERVER_IP:8890?streamid=publish:incoming&pkt_size=1316"
 ```
 
-The live source must contain H.264-compatible video. Its original video size,
+The live source may contain H.264 or H.265 video. The switcher reads the
+incoming path over RTSP/TCP internally, then publishes H.264/AAC to the
+program path. The source's original video size,
 frame rate, bitrate, sample rate, and channel layout do not need to match the
 program—this stack normalizes them. Video-only sources receive generated
 silent stereo AAC so the program still has exactly two audio channels.

@@ -32,7 +32,7 @@ services:
       - .env
     environment:
       MTX_API_URL: http://mediamtx:9997
-      INPUT_URL: rtmp://mediamtx:1935/incoming
+      INPUT_URL: rtsp://mediamtx:8554/incoming
       MEDIA_URL: rtmp://mediamtx:1935/media
       OUTPUT_URL: rtmp://mediamtx:1935/program
     volumes:
