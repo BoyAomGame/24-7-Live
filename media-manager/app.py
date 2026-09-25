@@ -73,6 +73,18 @@ def save_playlist(update: PlaylistUpdate):
     temporary.replace(PLAYLIST)
     return {"files": names}
 
+@app.delete("/api/media/{name}", dependencies=[Depends(auth)])
+def delete_media(name: str):
+    name = safe_name(name)
+    target = VIDEOS / name
+    if not target.is_file(): raise HTTPException(404, "File not found.")
+    target.unlink()
+    remaining = [item for item in playlist() if item != name]
+    temporary = PLAYLIST.with_suffix(".tmp")
+    temporary.write_text("\n".join(remaining) + ("\n" if remaining else ""), encoding="utf-8")
+    temporary.replace(PLAYLIST)
+    return {"deleted": name}
+
 @app.put("/api/playback", dependencies=[Depends(auth)])
 def set_playback(update: PlaybackUpdate):
     temporary = PLAYBACK.with_suffix(".tmp")
