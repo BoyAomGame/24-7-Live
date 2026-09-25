@@ -1,0 +1,83 @@
+#!/bin/sh
+set -eu
+
+SIZE="${VIDEO_SIZE:-1280x720}"
+SIZE_COLON="$(printf '%s' "$SIZE" | tr 'x' ':')"
+FPS="${FRAME_RATE:-30}"
+GOP="$((FPS * ${GOP_SECONDS:-2}))"
+INPUT_URL="${INPUT_URL:-rtmp://mediamtx:1935/incoming}"
+OUTPUT_URL="${OUTPUT_URL:-rtmp://mediamtx:1935/program}"
+API_URL="${MTX_API_URL:-http://mediamtx:9997}"
+CHECK_INTERVAL="${CHECK_INTERVAL_SECONDS:-2}"
+LIVE_CONFIRMATIONS="${LIVE_CONFIRMATIONS:-2}"
+worker_pid=""
+ready_checks=0
+
+stop_worker() {
+  if [ -n "$worker_pid" ] && kill -0 "$worker_pid" 2>/dev/null; then
+    echo "Stopping live normalizer"
+    kill "$worker_pid"
+    wait "$worker_pid" 2>/dev/null || true
+  fi
+  worker_pid=""
+}
+
+trap 'stop_worker; exit 0' INT TERM
+
+codec_args() {
+  # Kept inline in the command branches below because POSIX sh has no arrays.
+  :
+}
+
+source_has_audio() {
+  audio_track="$(ffprobe -v error -rw_timeout 3000000 -select_streams a:0 \
+    -show_entries stream=codec_type -of csv=p=0 "$INPUT_URL" 2>/dev/null || true)"
+  [ "$audio_track" = "audio" ]
+}
+
+start_live() {
+  echo "Starting live normalizer"
+  video_filter="scale=${SIZE}:force_original_aspect_ratio=decrease,pad=${SIZE_COLON}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1"
+  if source_has_audio; then
+    ffmpeg -hide_banner -loglevel warning -rw_timeout 5000000 -i "$INPUT_URL" \
+      -f lavfi -i "anullsrc=channel_layout=stereo:sample_rate=${AUDIO_RATE:-48000}" \
+      -filter_complex "[0:v:0]${video_filter}[video];[0:a:0]aresample=async=1:first_pts=0[audio]" \
+      -map "[video]" -map "[audio]" \
+      -c:v libx264 -preset "${X264_PRESET:-veryfast}" -profile:v high -pix_fmt yuv420p \
+      -r "$FPS" -g "$GOP" -keyint_min "$GOP" -sc_threshold 0 \
+      -b:v "${VIDEO_BITRATE:-4500k}" -maxrate "${VIDEO_MAXRATE:-4500k}" -bufsize "${VIDEO_BUFSIZE:-9000k}" \
+      -c:a aac -b:a "${AUDIO_BITRATE:-160k}" -ar "${AUDIO_RATE:-48000}" -ac "${AUDIO_CHANNELS:-2}" \
+      -flvflags no_duration_filesize -f flv "$OUTPUT_URL" &
+  else
+    echo "Live input has no readable audio; adding silent stereo AAC"
+    ffmpeg -hide_banner -loglevel warning -rw_timeout 5000000 -i "$INPUT_URL" \
+      -f lavfi -i "anullsrc=channel_layout=stereo:sample_rate=${AUDIO_RATE:-48000}" \
+      -vf "$video_filter" -map 0:v:0 -map 1:a:0 \
+      -c:v libx264 -preset "${X264_PRESET:-veryfast}" -profile:v high -pix_fmt yuv420p \
+      -r "$FPS" -g "$GOP" -keyint_min "$GOP" -sc_threshold 0 \
+      -b:v "${VIDEO_BITRATE:-4500k}" -maxrate "${VIDEO_MAXRATE:-4500k}" -bufsize "${VIDEO_BUFSIZE:-9000k}" \
+      -c:a aac -b:a "${AUDIO_BITRATE:-160k}" -ar "${AUDIO_RATE:-48000}" -ac "${AUDIO_CHANNELS:-2}" \
+      -flvflags no_duration_filesize -f flv "$OUTPUT_URL" &
+  fi
+  worker_pid=$!
+}
+
+while true; do
+  # A path-specific API call avoids brittle parsing of the complete paths list.
+  status="$(wget -qO- "${API_URL}/v3/paths/get/incoming" 2>/dev/null || true)"
+  case "$status" in
+    *'"ready":true'*) ready_checks=$((ready_checks + 1)) ;;
+    *) ready_checks=0 ;;
+  esac
+  [ "$ready_checks" -gt "$LIVE_CONFIRMATIONS" ] && ready_checks="$LIVE_CONFIRMATIONS"
+
+  if [ "$ready_checks" -ge "$LIVE_CONFIRMATIONS" ]; then
+    if [ -z "$worker_pid" ] || ! kill -0 "$worker_pid" 2>/dev/null; then
+      worker_pid=""
+      start_live
+    fi
+  else
+    stop_worker
+  fi
+  sleep "$CHECK_INTERVAL"
+done

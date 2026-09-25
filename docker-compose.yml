@@ -1,0 +1,52 @@
+services:
+  fallback:
+    build:
+      context: ./switcher
+    env_file:
+      - .env
+    entrypoint: ["sh", "/app/make_fallback.sh"]
+    volumes:
+      - offline:/offline
+
+  mediamtx:
+    image: bluenviron/mediamtx:1.21.1
+    restart: unless-stopped
+    depends_on:
+      fallback:
+        condition: service_completed_successfully
+    ports:
+      - "1935:1935/tcp" # RTMP ingest and program output
+      - "8890:8890/udp" # SRT ingest
+    volumes:
+      - ./mediamtx.yml:/mediamtx.yml:ro
+      - offline:/offline:ro
+      - ./recordings:/recordings
+
+  switcher:
+    build:
+      context: ./switcher
+    restart: unless-stopped
+    depends_on:
+      - mediamtx
+    env_file:
+      - .env
+    environment:
+      MTX_API_URL: http://mediamtx:9997
+      INPUT_URL: rtmp://mediamtx:1935/incoming
+      OUTPUT_URL: rtmp://mediamtx:1935/program
+
+  youtube-relay:
+    # Start only when explicitly requested with --profile youtube.
+    profiles: ["youtube"]
+    build:
+      context: ./switcher
+    restart: unless-stopped
+    depends_on:
+      - mediamtx
+    env_file:
+      - .env
+    environment:
+      PROGRAM_URL: rtmp://mediamtx:1935/program
+
+volumes:
+  offline:
