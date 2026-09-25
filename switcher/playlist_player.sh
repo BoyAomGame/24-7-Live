@@ -3,6 +3,7 @@ set -eu
 
 MEDIA_DIR="${MEDIA_DIR:-/media/videos}"
 PLAYLIST_FILE="${PLAYLIST_FILE:-/media/playlist.txt}"
+PLAYBACK_FLAG="${PLAYBACK_FLAG:-/media/playback.enabled}"
 OUTPUT_URL="${OUTPUT_URL:-rtmp://mediamtx:1935/media}"
 SIZE="${VIDEO_SIZE:-1280x720}"
 SIZE_COLON="$(printf '%s' "$SIZE" | tr 'x' ':')"
@@ -32,6 +33,6 @@ play_file() {
 
 mkdir -p "$MEDIA_DIR"
 while true; do
-  if [ ! -s "$PLAYLIST_FILE" ]; then sleep 3; continue; fi
+  if [ "$(cat "$PLAYBACK_FLAG" 2>/dev/null || echo on)" != "on" ] || [ ! -s "$PLAYLIST_FILE" ]; then sleep 1; continue; fi
   while IFS= read -r file || [ -n "$file" ]; do play_file "$file"; done < "$PLAYLIST_FILE"
 done
