@@ -6,7 +6,7 @@ from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import HTMLResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from pydantic import BaseModel
-ROOT=Path('/media'); VIDEOS=ROOT/'videos'; PLAYLIST=ROOT/'playlist.txt'; PLAYBACK=ROOT/'playback.enabled'; MODE=ROOT/'playlist.mode'
+ROOT=Path('/media'); VIDEOS=ROOT/'videos'; NORMALIZED=ROOT/'normalized'; PLAYLIST=ROOT/'playlist.txt'; PLAYBACK=ROOT/'playback.enabled'; MODE=ROOT/'playlist.mode'
 ALLOWED={'.mp4','.m4v','.mov','.mkv','.webm'}; USER=os.getenv('MEDIA_ADMIN_USERNAME','admin'); PASSWORD=os.getenv('MEDIA_ADMIN_PASSWORD','')
 security=HTTPBasic(); app=FastAPI(docs_url=None,redoc_url=None)
 def auth(c:Annotated[HTTPBasicCredentials,Depends(security)]):
@@ -22,6 +22,9 @@ def item(x):
  return name(x)
 def items(): return [x.strip() for x in PLAYLIST.read_text().splitlines() if x.strip()] if PLAYLIST.exists() else []
 def save(x): PLAYLIST.with_suffix('.tmp').write_text('\n'.join(x)+('\n' if x else '')); PLAYLIST.with_suffix('.tmp').replace(PLAYLIST)
+def clear_normalized(filename):
+ (NORMALIZED/(filename+'.mp4')).unlink(missing_ok=True)
+ (NORMALIZED/(filename+'.stamp')).unlink(missing_ok=True)
 class ListUpdate(BaseModel): files:list[str]
 class State(BaseModel): enabled:bool
 class ModeUpdate(BaseModel): mode:str
@@ -43,7 +46,7 @@ async def upload(file:UploadFile=File(...)):
  n=name(file.filename or ''); t=VIDEOS/n; tmp=t.with_suffix(t.suffix+'.uploading')
  with tmp.open('wb') as o:
   while c:=await file.read(1048576): o.write(c)
- tmp.replace(t); return {'file':n}
+ tmp.replace(t); clear_normalized(n); return {'file':n}
 @app.put('/api/playlist',dependencies=[Depends(auth)])
 def playlist(u:ListUpdate):
  x=[item(a) for a in u.files]
@@ -66,4 +69,4 @@ def mode(u:ModeUpdate):
 def delete(filename:str):
  n=name(filename); t=VIDEOS/n
  if not t.is_file(): raise HTTPException(404,'File not found.')
- t.unlink(); save([x for x in items() if x!=n]); return {'deleted':n}
+ t.unlink(); clear_normalized(n); save([x for x in items() if x!=n]); return {'deleted':n}

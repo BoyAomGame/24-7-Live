@@ -99,6 +99,12 @@ the short gaps between clips with color bars without disconnecting its reader.
 Already normalized playlist video is copied into `program` rather than
 encoded a second time.
 
+Local uploads are prepared once under `media/normalized/`, then played by
+stream copy. The first play can take time to prepare on a small VPS; color bars
+remain on screen until the file is ready. Allow disk space for the prepared
+copy alongside the original upload. Replacing or deleting an upload removes
+its prepared copy.
+
 When live input becomes active, playback stops and the current playlist item
 stays queued. Once live input ends, that item starts again from the beginning.
 In **Play once then remove** mode, an item is removed only after it finishes
