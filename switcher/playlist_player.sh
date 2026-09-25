@@ -57,7 +57,7 @@ play_file() {
       -vf "scale=${SIZE}:force_original_aspect_ratio=decrease,pad=${SIZE_COLON}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1" \
       -map 0:v:0 -map 1:a:0 -c:v libx264 -preset "${X264_PRESET:-veryfast}" -profile:v high -pix_fmt yuv420p \
       -r "$FPS" -g "$GOP" -keyint_min "$GOP" -sc_threshold 0 -b:v "${VIDEO_BITRATE:-4500k}" -maxrate "${VIDEO_MAXRATE:-4500k}" -bufsize "${VIDEO_BUFSIZE:-9000k}" \
-      -c:a aac -b:a "${AUDIO_BITRATE:-160k}" -ar "${AUDIO_RATE:-48000}" -ac "${AUDIO_CHANNELS:-2}" -flvflags no_duration_filesize -f flv "$OUTPUT_URL" &
+      -c:a aac -b:a "${AUDIO_BITRATE:-160k}" -ar "${AUDIO_RATE:-48000}" -ac "${AUDIO_CHANNELS:-2}" -shortest -flvflags no_duration_filesize -f flv "$OUTPUT_URL" &
   fi
   player_pid=$!
   missed_readers=0
