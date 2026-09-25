@@ -109,8 +109,9 @@ its prepared copy.
 
 When live input becomes active, playback stops and the current playlist item
 stays queued. Once live input ends, that item starts again from the beginning.
-In **Play once then remove** mode, an item is removed only after it finishes
-successfully; the uploaded file itself is retained.
+In **Play once (keep file)** mode, an item is removed from the playlist only
+after it finishes successfully. The uploaded file and its prepared copy remain
+available in the dashboard and can be added to the playlist again.
 
 ## Source recordings
 
