@@ -31,10 +31,10 @@ trap 'stop_worker; exit 0' INT TERM
 source_has_audio() {
   source_url="$1"
   case "$source_url" in
-    rtsp://*|rtsps://*) set -- -rtsp_transport tcp ;;
-    *) set -- ;;
+    rtsp://*|rtsps://*) set -- -rtsp_transport tcp -timeout 3000000 ;;
+    *) set -- -rw_timeout 3000000 ;;
   esac
-  audio_track="$(ffprobe -v error -rw_timeout 3000000 "$@" -select_streams a:0 \
+  audio_track="$(ffprobe -v error "$@" -select_streams a:0 \
     -show_entries stream=codec_type -of csv=p=0 "$source_url" 2>/dev/null || true)"
   [ "$audio_track" = "audio" ]
 }
@@ -44,11 +44,11 @@ start_live() {
   echo "Starting live input normalizer"
   video_filter="scale=${SIZE}:force_original_aspect_ratio=decrease,pad=${SIZE_COLON}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1"
   case "$source_url" in
-    rtsp://*|rtsps://*) set -- -rtsp_transport tcp ;;
-    *) set -- ;;
+    rtsp://*|rtsps://*) set -- -rtsp_transport tcp -timeout 5000000 ;;
+    *) set -- -rw_timeout 5000000 ;;
   esac
   if source_has_audio "$source_url"; then
-    ffmpeg -hide_banner -loglevel warning -rw_timeout 5000000 "$@" -i "$source_url" \
+    ffmpeg -hide_banner -loglevel warning "$@" -i "$source_url" \
       -f lavfi -i "anullsrc=channel_layout=stereo:sample_rate=${AUDIO_RATE:-48000}" \
       -filter_complex "[0:v:0]${video_filter}[video];[0:a:0]aresample=async=1:first_pts=0[audio]" \
       -map "[video]" -map "[audio]" \
@@ -59,7 +59,7 @@ start_live() {
       -flvflags no_duration_filesize -f flv "$OUTPUT_URL" &
   else
     echo "Live input has no readable audio; adding silent stereo AAC"
-    ffmpeg -hide_banner -loglevel warning -rw_timeout 5000000 "$@" -i "$source_url" \
+    ffmpeg -hide_banner -loglevel warning "$@" -i "$source_url" \
       -f lavfi -i "anullsrc=channel_layout=stereo:sample_rate=${AUDIO_RATE:-48000}" \
       -vf "$video_filter" -map 0:v:0 -map 1:a:0 \
       -c:v libx264 -preset "${X264_PRESET:-veryfast}" -profile:v high -pix_fmt yuv420p \
