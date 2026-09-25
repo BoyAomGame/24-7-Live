@@ -89,6 +89,21 @@ YouTube must have live streaming enabled. First-time activation can take up to
 24 hours. In YouTube's Live Control Room, use the stream preview and go live
 when it is ready.
 
+## Playlist playback
+
+Start the media profile with `docker compose --profile media up -d --build`.
+Upload videos or add direct MP4/HLS links in the media dashboard and save the
+playlist. The switcher connects to the media path before the player starts a
+clip, so its opening is included in the program output. The media path fills
+the short gaps between clips with color bars without disconnecting its reader.
+Already normalized playlist video is copied into `program` rather than
+encoded a second time.
+
+When live input becomes active, playback stops and the current playlist item
+stays queued. Once live input ends, that item starts again from the beginning.
+In **Play once then remove** mode, an item is removed only after it finishes
+successfully; the uploaded file itself is retained.
+
 ## Source recordings
 
 Every received stream is recorded before it is normalized, so a recording

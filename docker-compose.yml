@@ -33,7 +33,10 @@ services:
     environment:
       MTX_API_URL: http://mediamtx:9997
       INPUT_URL: rtmp://mediamtx:1935/incoming
+      MEDIA_URL: rtmp://mediamtx:1935/media
       OUTPUT_URL: rtmp://mediamtx:1935/program
+    volumes:
+      - ./media:/media:ro
 
   youtube-relay:
     # Start only when explicitly requested with --profile youtube.
@@ -59,6 +62,8 @@ services:
     env_file:
       - .env
     entrypoint: ["sh", "/app/playlist_player.sh"]
+    environment:
+      MTX_API_URL: http://mediamtx:9997
     volumes:
       - ./media:/media
 

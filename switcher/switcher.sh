@@ -14,10 +14,12 @@ LIVE_CONFIRMATIONS="${LIVE_CONFIRMATIONS:-2}"
 worker_pid=""
 ready_checks=0
 active_source=""
+PLAYLIST_FILE="${PLAYLIST_FILE:-/media/playlist.txt}"
+PLAYBACK_FLAG="${PLAYBACK_FLAG:-/media/playback.enabled}"
 
 stop_worker() {
   if [ -n "$worker_pid" ] && kill -0 "$worker_pid" 2>/dev/null; then
-    echo "Stopping live normalizer"
+    echo "Stopping program source"
     kill "$worker_pid"
     wait "$worker_pid" 2>/dev/null || true
   fi
@@ -25,11 +27,6 @@ stop_worker() {
 }
 
 trap 'stop_worker; exit 0' INT TERM
-
-codec_args() {
-  # Kept inline in the command branches below because POSIX sh has no arrays.
-  :
-}
 
 source_has_audio() {
   source_url="$1"
@@ -40,7 +37,7 @@ source_has_audio() {
 
 start_live() {
   source_url="$1"
-  echo "Starting live normalizer"
+  echo "Starting live input normalizer"
   video_filter="scale=${SIZE}:force_original_aspect_ratio=decrease,pad=${SIZE_COLON}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1"
   if source_has_audio "$source_url"; then
     ffmpeg -hide_banner -loglevel warning -rw_timeout 5000000 -i "$source_url" \
@@ -66,6 +63,24 @@ start_live() {
   worker_pid=$!
 }
 
+start_media() {
+  echo "Connecting playlist media to program"
+  # The player and the media fallback already use the program codec contract.
+  # Stream copy avoids a second encode and keeps this RTMP reader connected.
+  ffmpeg -hide_banner -loglevel warning -rw_timeout 5000000 -i "$MEDIA_URL" \
+    -map 0:v:0 -map 0:a:0 -c copy \
+    -flvflags no_duration_filesize -f flv "$OUTPUT_URL" &
+  worker_pid=$!
+}
+
+start_source() {
+  if [ "$active_source" = "$MEDIA_URL" ]; then
+    start_media
+  else
+    start_live "$active_source"
+  fi
+}
+
 while true; do
   # A path-specific API call avoids brittle parsing of the complete paths list.
   status="$(wget -qO- "${API_URL}/v3/paths/get/incoming" 2>/dev/null || true)"
@@ -75,18 +90,17 @@ while true; do
   esac
   [ "$ready_checks" -gt "$LIVE_CONFIRMATIONS" ] && ready_checks="$LIVE_CONFIRMATIONS"
 
-  media_status="$(wget -qO- "${API_URL}/v3/paths/get/media" 2>/dev/null || true)"
   next_source=""
   if [ "$ready_checks" -ge "$LIVE_CONFIRMATIONS" ]; then next_source="$INPUT_URL";
-  elif echo "$media_status" | grep -q '"ready":true'; then next_source="$MEDIA_URL"; fi
+  elif [ "$(cat "$PLAYBACK_FLAG" 2>/dev/null || echo on)" = "on" ] && [ -s "$PLAYLIST_FILE" ]; then next_source="$MEDIA_URL"; fi
 
   if [ "$next_source" != "$active_source" ]; then
     stop_worker
     active_source="$next_source"
-    [ -n "$active_source" ] && start_live "$active_source"
+    [ -n "$active_source" ] && start_source
   elif [ -n "$active_source" ] && { [ -z "$worker_pid" ] || ! kill -0 "$worker_pid" 2>/dev/null; }; then
     worker_pid=""
-    start_live "$active_source"
+    start_source
   fi
   sleep "$CHECK_INTERVAL"
 done

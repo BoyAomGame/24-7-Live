@@ -20,8 +20,10 @@ pathDefaults:
 
 paths:
   media:
-    # The local playlist player publishes here; switcher gives live input priority.
+    # Keep the switcher's reader connected across playlist item boundaries.
     overridePublisher: true
+    alwaysAvailable: true
+    alwaysAvailableFile: /offline/bars.mp4
   incoming:
     # A new encoder may replace a stale incoming feed.
     overridePublisher: true
