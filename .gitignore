@@ -3,3 +3,5 @@
 
 # Runtime recordings can become large and are not source files.
 recordings/
+media/videos/
+media/playlist.txt

@@ -49,5 +49,30 @@ services:
     environment:
       PROGRAM_URL: rtmp://mediamtx:1935/program
 
+  playlist-player:
+    profiles: ["media"]
+    build:
+      context: ./switcher
+    restart: unless-stopped
+    depends_on:
+      - mediamtx
+    env_file:
+      - .env
+    entrypoint: ["sh", "/app/playlist_player.sh"]
+    volumes:
+      - ./media:/media
+
+  media-manager:
+    profiles: ["media"]
+    build:
+      context: ./media-manager
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "127.0.0.1:${MEDIA_WEB_PORT:-8080}:8080"
+    volumes:
+      - ./media:/media
+
 volumes:
   offline:

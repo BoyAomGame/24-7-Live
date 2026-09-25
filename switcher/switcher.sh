@@ -6,12 +6,14 @@ SIZE_COLON="$(printf '%s' "$SIZE" | tr 'x' ':')"
 FPS="${FRAME_RATE:-30}"
 GOP="$((FPS * ${GOP_SECONDS:-2}))"
 INPUT_URL="${INPUT_URL:-rtmp://mediamtx:1935/incoming}"
+MEDIA_URL="${MEDIA_URL:-rtmp://mediamtx:1935/media}"
 OUTPUT_URL="${OUTPUT_URL:-rtmp://mediamtx:1935/program}"
 API_URL="${MTX_API_URL:-http://mediamtx:9997}"
 CHECK_INTERVAL="${CHECK_INTERVAL_SECONDS:-2}"
 LIVE_CONFIRMATIONS="${LIVE_CONFIRMATIONS:-2}"
 worker_pid=""
 ready_checks=0
+active_source=""
 
 stop_worker() {
   if [ -n "$worker_pid" ] && kill -0 "$worker_pid" 2>/dev/null; then
@@ -30,16 +32,18 @@ codec_args() {
 }
 
 source_has_audio() {
+  source_url="$1"
   audio_track="$(ffprobe -v error -rw_timeout 3000000 -select_streams a:0 \
-    -show_entries stream=codec_type -of csv=p=0 "$INPUT_URL" 2>/dev/null || true)"
+    -show_entries stream=codec_type -of csv=p=0 "$source_url" 2>/dev/null || true)"
   [ "$audio_track" = "audio" ]
 }
 
 start_live() {
+  source_url="$1"
   echo "Starting live normalizer"
   video_filter="scale=${SIZE}:force_original_aspect_ratio=decrease,pad=${SIZE_COLON}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1"
-  if source_has_audio; then
-    ffmpeg -hide_banner -loglevel warning -rw_timeout 5000000 -i "$INPUT_URL" \
+  if source_has_audio "$source_url"; then
+    ffmpeg -hide_banner -loglevel warning -rw_timeout 5000000 -i "$source_url" \
       -f lavfi -i "anullsrc=channel_layout=stereo:sample_rate=${AUDIO_RATE:-48000}" \
       -filter_complex "[0:v:0]${video_filter}[video];[0:a:0]aresample=async=1:first_pts=0[audio]" \
       -map "[video]" -map "[audio]" \
@@ -50,7 +54,7 @@ start_live() {
       -flvflags no_duration_filesize -f flv "$OUTPUT_URL" &
   else
     echo "Live input has no readable audio; adding silent stereo AAC"
-    ffmpeg -hide_banner -loglevel warning -rw_timeout 5000000 -i "$INPUT_URL" \
+    ffmpeg -hide_banner -loglevel warning -rw_timeout 5000000 -i "$source_url" \
       -f lavfi -i "anullsrc=channel_layout=stereo:sample_rate=${AUDIO_RATE:-48000}" \
       -vf "$video_filter" -map 0:v:0 -map 1:a:0 \
       -c:v libx264 -preset "${X264_PRESET:-veryfast}" -profile:v high -pix_fmt yuv420p \
@@ -71,13 +75,18 @@ while true; do
   esac
   [ "$ready_checks" -gt "$LIVE_CONFIRMATIONS" ] && ready_checks="$LIVE_CONFIRMATIONS"
 
-  if [ "$ready_checks" -ge "$LIVE_CONFIRMATIONS" ]; then
-    if [ -z "$worker_pid" ] || ! kill -0 "$worker_pid" 2>/dev/null; then
-      worker_pid=""
-      start_live
-    fi
-  else
+  media_status="$(wget -qO- "${API_URL}/v3/paths/get/media" 2>/dev/null || true)"
+  next_source=""
+  if [ "$ready_checks" -ge "$LIVE_CONFIRMATIONS" ]; then next_source="$INPUT_URL";
+  elif echo "$media_status" | grep -q '"ready":true'; then next_source="$MEDIA_URL"; fi
+
+  if [ "$next_source" != "$active_source" ]; then
     stop_worker
+    active_source="$next_source"
+    [ -n "$active_source" ] && start_live "$active_source"
+  elif [ -n "$active_source" ] && { [ -z "$worker_pid" ] || ! kill -0 "$worker_pid" 2>/dev/null; }; then
+    worker_pid=""
+    start_live "$active_source"
   fi
   sleep "$CHECK_INTERVAL"
 done

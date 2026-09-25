@@ -19,6 +19,9 @@ pathDefaults:
   overridePublisher: true
 
 paths:
+  media:
+    # The local playlist player publishes here; switcher gives live input priority.
+    overridePublisher: true
   incoming:
     # A new encoder may replace a stale incoming feed.
     overridePublisher: true
