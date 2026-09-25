@@ -25,6 +25,7 @@ def save(x): PLAYLIST.with_suffix('.tmp').write_text('\n'.join(x)+('\n' if x els
 class ListUpdate(BaseModel): files:list[str]
 class State(BaseModel): enabled:bool
 class ModeUpdate(BaseModel): mode:str
+class RemoteSource(BaseModel): url:str
 @app.on_event('startup')
 def startup():
  if not PASSWORD: raise RuntimeError('Set MEDIA_ADMIN_PASSWORD in .env')
@@ -48,6 +49,13 @@ def playlist(u:ListUpdate):
  x=[item(a) for a in u.files]
  if any(not a.startswith(('http://','https://')) and not(VIDEOS/a).is_file() for a in x): raise HTTPException(400,'Missing file.')
  save(x); return {'files':x}
+@app.post('/api/playlist/remote',dependencies=[Depends(auth)])
+def remote(u:RemoteSource):
+ url=item(u.url.strip())
+ if not url.startswith(('http://','https://')): raise HTTPException(400,'Use an HTTP(S) URL.')
+ x=items()
+ if url not in x: save(x+[url])
+ return {'files':items()}
 @app.put('/api/playback',dependencies=[Depends(auth)])
 def playback(u:State): PLAYBACK.write_text('on\n' if u.enabled else 'off\n'); return {'enabled':u.enabled}
 @app.put('/api/playlist/mode',dependencies=[Depends(auth)])
