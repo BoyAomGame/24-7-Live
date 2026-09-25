@@ -2,6 +2,7 @@ import os
 import secrets
 from pathlib import Path
 from typing import Annotated
+from urllib.parse import urlparse
 
 from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import HTMLResponse
@@ -28,6 +29,14 @@ def safe_name(name: str) -> str:
         raise HTTPException(400, "Use MP4, M4V, MOV, MKV, or WebM files.")
     return name
 
+def safe_playlist_item(item: str) -> str:
+    if item.startswith(("http://", "https://")):
+        parsed = urlparse(item)
+        if not parsed.netloc or Path(parsed.path).suffix.lower() not in {".mp4", ".m3u8"}:
+            raise HTTPException(400, "Use a direct HTTP(S) MP4 or HLS M3U8 URL.")
+        return item
+    return safe_name(item)
+
 def playlist() -> list[str]:
     if not PLAYLIST.exists(): return []
     return [line.strip() for line in PLAYLIST.read_text(encoding="utf-8").splitlines() if line.strip()]
@@ -37,6 +46,9 @@ class PlaylistUpdate(BaseModel):
 
 class PlaybackUpdate(BaseModel):
     enabled: bool
+
+class RemoteSource(BaseModel):
+    url: str
 
 @app.on_event("startup")
 def setup():
@@ -66,12 +78,24 @@ async def upload(file: UploadFile = File(...)):
 
 @app.put("/api/playlist", dependencies=[Depends(auth)])
 def save_playlist(update: PlaylistUpdate):
-    names = [safe_name(name) for name in update.files]
-    if any(not (VIDEOS / name).is_file() for name in names): raise HTTPException(400, "Playlist contains a missing file.")
+    names = [safe_playlist_item(name) for name in update.files]
+    if any(not name.startswith(("http://", "https://")) and not (VIDEOS / name).is_file() for name in names): raise HTTPException(400, "Playlist contains a missing file.")
     temporary = PLAYLIST.with_suffix(".tmp")
     temporary.write_text("\n".join(names) + ("\n" if names else ""), encoding="utf-8")
     temporary.replace(PLAYLIST)
     return {"files": names}
+
+@app.post("/api/playlist/remote", dependencies=[Depends(auth)])
+def add_remote_source(source: RemoteSource):
+    url = safe_playlist_item(source.url.strip())
+    if not url.startswith(("http://", "https://")):
+        raise HTTPException(400, "A remote source must be an HTTP(S) URL.")
+    items = playlist()
+    if url not in items: items.append(url)
+    temporary = PLAYLIST.with_suffix(".tmp")
+    temporary.write_text("\n".join(items) + "\n", encoding="utf-8")
+    temporary.replace(PLAYLIST)
+    return {"files": items}
 
 @app.delete("/api/media/{name}", dependencies=[Depends(auth)])
 def delete_media(name: str):

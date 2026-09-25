@@ -12,8 +12,10 @@ GOP="$((FPS * ${GOP_SECONDS:-2}))"
 
 play_file() {
   file="$1"
-  path="$MEDIA_DIR/$file"
-  [ -f "$path" ] || return 0
+  case "$file" in
+    http://*|https://*) path="$file" ;;
+    *) path="$MEDIA_DIR/$file"; [ -f "$path" ] || return 0 ;;
+  esac
   echo "Playing $file"
   audio_track="$(ffprobe -v error -select_streams a:0 -show_entries stream=codec_type -of csv=p=0 "$path" 2>/dev/null || true)"
   if [ "$audio_track" = "audio" ]; then
