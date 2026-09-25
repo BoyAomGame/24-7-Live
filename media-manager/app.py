@@ -13,6 +13,7 @@ ROOT = Path("/media")
 VIDEOS = ROOT / "videos"
 PLAYLIST = ROOT / "playlist.txt"
 PLAYBACK = ROOT / "playback.enabled"
+PLAYLIST_MODE = ROOT / "playlist.mode"
 ALLOWED = {".mp4", ".m4v", ".mov", ".mkv", ".webm"}
 USER = os.getenv("MEDIA_ADMIN_USERNAME", "admin")
 PASSWORD = os.getenv("MEDIA_ADMIN_PASSWORD", "")
@@ -50,12 +51,16 @@ class PlaybackUpdate(BaseModel):
 class RemoteSource(BaseModel):
     url: str
 
+class PlaylistModeUpdate(BaseModel):
+    mode: str
+
 @app.on_event("startup")
 def setup():
     if not PASSWORD: raise RuntimeError("Set MEDIA_ADMIN_PASSWORD in .env before starting the media profile")
     VIDEOS.mkdir(parents=True, exist_ok=True)
     PLAYLIST.touch(exist_ok=True)
     if not PLAYBACK.exists(): PLAYBACK.write_text("on\n", encoding="utf-8")
+    if not PLAYLIST_MODE.exists(): PLAYLIST_MODE.write_text("loop\n", encoding="utf-8")
 
 @app.get("/", response_class=HTMLResponse, dependencies=[Depends(auth)])
 def home():
@@ -115,3 +120,11 @@ def set_playback(update: PlaybackUpdate):
     temporary.write_text("on\n" if update.enabled else "off\n", encoding="utf-8")
     temporary.replace(PLAYBACK)
     return {"enabled": update.enabled}
+
+@app.put("/api/playlist/mode", dependencies=[Depends(auth)])
+def set_playlist_mode(update: PlaylistModeUpdate):
+    if update.mode not in {"loop", "once"}: raise HTTPException(400, "Mode must be loop or once.")
+    temporary = PLAYLIST_MODE.with_suffix(".tmp")
+    temporary.write_text(update.mode + "\n", encoding="utf-8")
+    temporary.replace(PLAYLIST_MODE)
+    return {"mode": update.mode}
