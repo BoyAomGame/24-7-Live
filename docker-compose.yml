@@ -45,6 +45,7 @@ services:
       - mediamtx
     env_file:
       - .env
+    entrypoint: ["sh", "/app/youtube_relay.sh"]
     environment:
       PROGRAM_URL: rtmp://mediamtx:1935/program
 
