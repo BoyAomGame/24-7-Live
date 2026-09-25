@@ -1,130 +1,61 @@
-import os
-import secrets
+import os, secrets
 from pathlib import Path
 from typing import Annotated
 from urllib.parse import urlparse
-
 from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import HTMLResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from pydantic import BaseModel
-
-ROOT = Path("/media")
-VIDEOS = ROOT / "videos"
-PLAYLIST = ROOT / "playlist.txt"
-PLAYBACK = ROOT / "playback.enabled"
-PLAYLIST_MODE = ROOT / "playlist.mode"
-ALLOWED = {".mp4", ".m4v", ".mov", ".mkv", ".webm"}
-USER = os.getenv("MEDIA_ADMIN_USERNAME", "admin")
-PASSWORD = os.getenv("MEDIA_ADMIN_PASSWORD", "")
-security = HTTPBasic()
-app = FastAPI(title="Local Media Library", docs_url=None, redoc_url=None)
-
-def auth(credentials: Annotated[HTTPBasicCredentials, Depends(security)]):
-    if not PASSWORD or not (secrets.compare_digest(credentials.username, USER) and secrets.compare_digest(credentials.password, PASSWORD)):
-        raise HTTPException(status_code=401, detail="Invalid credentials", headers={"WWW-Authenticate": "Basic"})
-
-def safe_name(name: str) -> str:
-    name = Path(name).name
-    if not name or Path(name).suffix.lower() not in ALLOWED:
-        raise HTTPException(400, "Use MP4, M4V, MOV, MKV, or WebM files.")
-    return name
-
-def safe_playlist_item(item: str) -> str:
-    if item.startswith(("http://", "https://")):
-        parsed = urlparse(item)
-        if not parsed.netloc or Path(parsed.path).suffix.lower() not in {".mp4", ".m3u8"}:
-            raise HTTPException(400, "Use a direct HTTP(S) MP4 or HLS M3U8 URL.")
-        return item
-    return safe_name(item)
-
-def playlist() -> list[str]:
-    if not PLAYLIST.exists(): return []
-    return [line.strip() for line in PLAYLIST.read_text(encoding="utf-8").splitlines() if line.strip()]
-
-class PlaylistUpdate(BaseModel):
-    files: list[str]
-
-class PlaybackUpdate(BaseModel):
-    enabled: bool
-
-class RemoteSource(BaseModel):
-    url: str
-
-class PlaylistModeUpdate(BaseModel):
-    mode: str
-
-@app.on_event("startup")
-def setup():
-    if not PASSWORD: raise RuntimeError("Set MEDIA_ADMIN_PASSWORD in .env before starting the media profile")
-    VIDEOS.mkdir(parents=True, exist_ok=True)
-    PLAYLIST.touch(exist_ok=True)
-    if not PLAYBACK.exists(): PLAYBACK.write_text("on\n", encoding="utf-8")
-    if not PLAYLIST_MODE.exists(): PLAYLIST_MODE.write_text("loop\n", encoding="utf-8")
-
-@app.get("/", response_class=HTMLResponse, dependencies=[Depends(auth)])
-def home():
-    return '''<!doctype html><title>Local Media Library</title><style>body{font:16px system-ui;max-width:760px;margin:3rem auto;padding:0 1rem}li{margin:.5rem 0}button{margin-left:.5rem}#status{color:#175d28}</style><h1>Local Media Library</h1><p>Uploads play in playlist order whenever no live input is active.</p><form id=f><input type=file name=file accept="video/*" required><button>Upload</button></form><p id=status></p><ol id=list></ol><button onclick=save()>Save playlist</button><button onclick=setPlayback(true)>Play playlist</button><button onclick=setPlayback(false)>Show color bars</button><script>let files=[],order=[];const l=document.querySelector('#list'),s=document.querySelector('#status');async function load(){let x=await fetch('/api/media');({files,playlist:order}=await x.json());render()}function render(){l.innerHTML='';files.forEach(n=>{let i=document.createElement('li'),c=document.createElement('input');c.type='checkbox';c.checked=order.includes(n);c.onchange=()=>{order=c.checked?[...order,n]:order.filter(x=>x!=n);render()};i.append(c,' ',n);if(c.checked){let u=document.createElement('button');u.textContent='Up';u.onclick=()=>{let p=order.indexOf(n);if(p){[order[p-1],order[p]]=[order[p],order[p-1]];render()}};let d=document.createElement('button');d.textContent='Down';d.onclick=()=>{let p=order.indexOf(n);if(p<order.length-1){[order[p+1],order[p]]=[order[p],order[p+1]];render()}};i.append(u,d)}l.append(i)})}document.querySelector('#f').onsubmit=async e=>{e.preventDefault();s.textContent='Uploading…';let r=await fetch('/api/upload',{method:'POST',body:new FormData(e.target)});s.textContent=r.ok?'Uploaded. Add it to the playlist and save.':await r.text();if(r.ok){e.target.reset();load()}};async function save(){let r=await fetch('/api/playlist',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({files:order})});s.textContent=r.ok?'Playlist saved.':'Could not save playlist.'}async function setPlayback(enabled){let r=await fetch('/api/playback',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({enabled})});s.textContent=r.ok?(enabled?'Playlist will play when idle.':'Color bars will show when idle.'):'Could not change fallback.'}load()</script>'''
-
-@app.get("/api/media", dependencies=[Depends(auth)])
-def list_media():
-    items = sorted(p.name for p in VIDEOS.iterdir() if p.is_file() and p.suffix.lower() in ALLOWED)
-    return {"files": items, "playlist": playlist()}
-
-@app.post("/api/upload", dependencies=[Depends(auth)])
-async def upload(file: UploadFile = File(...)):
-    name = safe_name(file.filename or "")
-    target = VIDEOS / name
-    temporary = target.with_suffix(target.suffix + ".uploading")
-    with temporary.open("wb") as out:
-        while chunk := await file.read(1024 * 1024): out.write(chunk)
-    temporary.replace(target)
-    return {"file": name}
-
-@app.put("/api/playlist", dependencies=[Depends(auth)])
-def save_playlist(update: PlaylistUpdate):
-    names = [safe_playlist_item(name) for name in update.files]
-    if any(not name.startswith(("http://", "https://")) and not (VIDEOS / name).is_file() for name in names): raise HTTPException(400, "Playlist contains a missing file.")
-    temporary = PLAYLIST.with_suffix(".tmp")
-    temporary.write_text("\n".join(names) + ("\n" if names else ""), encoding="utf-8")
-    temporary.replace(PLAYLIST)
-    return {"files": names}
-
-@app.post("/api/playlist/remote", dependencies=[Depends(auth)])
-def add_remote_source(source: RemoteSource):
-    url = safe_playlist_item(source.url.strip())
-    if not url.startswith(("http://", "https://")):
-        raise HTTPException(400, "A remote source must be an HTTP(S) URL.")
-    items = playlist()
-    if url not in items: items.append(url)
-    temporary = PLAYLIST.with_suffix(".tmp")
-    temporary.write_text("\n".join(items) + "\n", encoding="utf-8")
-    temporary.replace(PLAYLIST)
-    return {"files": items}
-
-@app.delete("/api/media/{name}", dependencies=[Depends(auth)])
-def delete_media(name: str):
-    name = safe_name(name)
-    target = VIDEOS / name
-    if not target.is_file(): raise HTTPException(404, "File not found.")
-    target.unlink()
-    remaining = [item for item in playlist() if item != name]
-    temporary = PLAYLIST.with_suffix(".tmp")
-    temporary.write_text("\n".join(remaining) + ("\n" if remaining else ""), encoding="utf-8")
-    temporary.replace(PLAYLIST)
-    return {"deleted": name}
-
-@app.put("/api/playback", dependencies=[Depends(auth)])
-def set_playback(update: PlaybackUpdate):
-    temporary = PLAYBACK.with_suffix(".tmp")
-    temporary.write_text("on\n" if update.enabled else "off\n", encoding="utf-8")
-    temporary.replace(PLAYBACK)
-    return {"enabled": update.enabled}
-
-@app.put("/api/playlist/mode", dependencies=[Depends(auth)])
-def set_playlist_mode(update: PlaylistModeUpdate):
-    if update.mode not in {"loop", "once"}: raise HTTPException(400, "Mode must be loop or once.")
-    temporary = PLAYLIST_MODE.with_suffix(".tmp")
-    temporary.write_text(update.mode + "\n", encoding="utf-8")
-    temporary.replace(PLAYLIST_MODE)
-    return {"mode": update.mode}
+ROOT=Path('/media'); VIDEOS=ROOT/'videos'; PLAYLIST=ROOT/'playlist.txt'; PLAYBACK=ROOT/'playback.enabled'; MODE=ROOT/'playlist.mode'
+ALLOWED={'.mp4','.m4v','.mov','.mkv','.webm'}; USER=os.getenv('MEDIA_ADMIN_USERNAME','admin'); PASSWORD=os.getenv('MEDIA_ADMIN_PASSWORD','')
+security=HTTPBasic(); app=FastAPI(docs_url=None,redoc_url=None)
+def auth(c:Annotated[HTTPBasicCredentials,Depends(security)]):
+ if not PASSWORD or not(secrets.compare_digest(c.username,USER) and secrets.compare_digest(c.password,PASSWORD)): raise HTTPException(401,'Invalid credentials',{'WWW-Authenticate':'Basic'})
+def name(x):
+ x=Path(x).name
+ if not x or Path(x).suffix.lower() not in ALLOWED: raise HTTPException(400,'Use MP4, M4V, MOV, MKV, or WebM files.')
+ return x
+def item(x):
+ if x.startswith(('http://','https://')):
+  if not urlparse(x).netloc or Path(urlparse(x).path).suffix.lower() not in {'.mp4','.m3u8'}: raise HTTPException(400,'Use a direct HTTP(S) MP4 or HLS M3U8 URL.')
+  return x
+ return name(x)
+def items(): return [x.strip() for x in PLAYLIST.read_text().splitlines() if x.strip()] if PLAYLIST.exists() else []
+def save(x): PLAYLIST.with_suffix('.tmp').write_text('\n'.join(x)+('\n' if x else '')); PLAYLIST.with_suffix('.tmp').replace(PLAYLIST)
+class ListUpdate(BaseModel): files:list[str]
+class State(BaseModel): enabled:bool
+class ModeUpdate(BaseModel): mode:str
+@app.on_event('startup')
+def startup():
+ if not PASSWORD: raise RuntimeError('Set MEDIA_ADMIN_PASSWORD in .env')
+ VIDEOS.mkdir(parents=True,exist_ok=True); PLAYLIST.touch(exist_ok=True)
+ if not PLAYBACK.exists(): PLAYBACK.write_text('on\n')
+ if not MODE.exists(): MODE.write_text('loop\n')
+@app.get('/',response_class=HTMLResponse,dependencies=[Depends(auth)])
+def home(): return '''<!doctype html><title>Media</title><style>body{font:16px system-ui;max-width:700px;margin:3rem auto}button{margin:.25rem}.on{background:#176b3a;color:#fff}</style><h1>Local Media Library</h1><p id=s>Loading…</p><button id=loop onclick=m('loop')>Loop playlist</button><button id=once onclick=m('once')>Play once then remove</button><button id=bars onclick=p(false)>Show color bars</button><button onclick=p(true)>Play playlist</button><hr><form id=f><input type=file name=file accept="video/*" required><button>Upload</button></form><ol id=l></ol><button onclick=saveList()>Save playlist</button><script>let files=[],list=[],$=x=>document.querySelector(x);async function r(u,o={}){let x=await fetch(u,o);if(!x.ok)throw Error(await x.text());return x.json()}async function load(){let d=await r('/api/media'),q=await r('/api/status');files=d.files;list=d.playlist;$('#s').textContent='Fallback: '+(!q.enabled?'color bars':q.mode==='once'?'play once then remove':'loop playlist');['loop','once','bars'].forEach(x=>$('#'+x).classList.toggle('on',x==='bars'?!q.enabled:q.enabled&&x===q.mode));draw()}function draw(){let l=$('#l');l.innerHTML='';files.forEach(n=>{let i=document.createElement('li'),c=document.createElement('input');c.type='checkbox';c.checked=list.includes(n);c.onchange=()=>{list=c.checked?[...list,n]:list.filter(x=>x!==n);draw()};let d=document.createElement('button');d.textContent='Delete';d.onclick=async()=>{if(confirm('Delete '+n+'?')){await r('/api/media/'+encodeURIComponent(n),{method:'DELETE'});load()}};i.append(c,' ',n,d);l.append(i)})}async function p(e){await r('/api/playback',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({enabled:e})});load()}async function m(x){await r('/api/playlist/mode',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({mode:x})});p(true)}async function saveList(){await r('/api/playlist',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({files:list})});load()}$('#f').onsubmit=async e=>{e.preventDefault();await r('/api/upload',{method:'POST',body:new FormData(e.target)});e.target.reset();load()};load()</script>'''
+@app.get('/api/status',dependencies=[Depends(auth)])
+def status(): return {'enabled':PLAYBACK.read_text().strip()=='on','mode':MODE.read_text().strip()}
+@app.get('/api/media',dependencies=[Depends(auth)])
+def media(): return {'files':sorted(x.name for x in VIDEOS.iterdir() if x.is_file() and x.suffix.lower() in ALLOWED),'playlist':items()}
+@app.post('/api/upload',dependencies=[Depends(auth)])
+async def upload(file:UploadFile=File(...)):
+ n=name(file.filename or ''); t=VIDEOS/n; tmp=t.with_suffix(t.suffix+'.uploading')
+ with tmp.open('wb') as o:
+  while c:=await file.read(1048576): o.write(c)
+ tmp.replace(t); return {'file':n}
+@app.put('/api/playlist',dependencies=[Depends(auth)])
+def playlist(u:ListUpdate):
+ x=[item(a) for a in u.files]
+ if any(not a.startswith(('http://','https://')) and not(VIDEOS/a).is_file() for a in x): raise HTTPException(400,'Missing file.')
+ save(x); return {'files':x}
+@app.put('/api/playback',dependencies=[Depends(auth)])
+def playback(u:State): PLAYBACK.write_text('on\n' if u.enabled else 'off\n'); return {'enabled':u.enabled}
+@app.put('/api/playlist/mode',dependencies=[Depends(auth)])
+def mode(u:ModeUpdate):
+ if u.mode not in {'loop','once'}: raise HTTPException(400,'Mode must be loop or once.')
+ MODE.write_text(u.mode+'\n'); return {'mode':u.mode}
+@app.delete('/api/media/{filename}',dependencies=[Depends(auth)])
+def delete(filename:str):
+ n=name(filename); t=VIDEOS/n
+ if not t.is_file(): raise HTTPException(404,'File not found.')
+ t.unlink(); save([x for x in items() if x!=n]); return {'deleted':n}
