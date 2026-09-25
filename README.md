@@ -101,6 +101,9 @@ the short gaps between clips with color bars without disconnecting its reader.
 Already normalized playlist video is copied into `program` rather than
 encoded a second time.
 
+The dashboard shows upload progress while a video transfers to the VPS.
+Preparing the video for playback happens separately on its first play.
+
 Local uploads are prepared once under `media/normalized/`, then played by
 stream copy. The first play can take time to prepare on a small VPS; color bars
 remain on screen until the file is ready. Allow disk space for the prepared
