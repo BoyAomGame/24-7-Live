@@ -84,7 +84,7 @@ start_media() {
 
 start_fallback() {
   echo "Starting clocked fallback"
-  clock_filter="drawtext=fontfile=/usr/share/fonts/dejavu/DejaVuSansMono.ttf:text='%{localtime}':fontcolor=white:fontsize=${CLOCK_FONT_SIZE:-40}:x=(w-text_w)/2:y=h-text_h-32:box=1:boxcolor=black@0.75:boxborderw=12"
+  clock_filter="drawtext=fontfile=/usr/share/fonts/dejavu/DejaVuSansMono.ttf:text='%{localtime}':fontcolor=white:fontsize=${CLOCK_FONT_SIZE:-40}:x=32:y=32:box=1:boxcolor=black@0.75:boxborderw=12"
   ffmpeg -hide_banner -loglevel warning \
     -re -f lavfi -i "smptebars=size=${SIZE}:rate=${FPS}" \
     -re -f lavfi -i "anullsrc=channel_layout=stereo:sample_rate=${AUDIO_RATE:-48000}" \

@@ -13,7 +13,8 @@ or audio layout.
 
 The switcher generates the clocked bars in real time. A short, static bar clip
 remains in MediaMTX to cover switch gaps or a stopped switcher, so the output
-stays available. During those gaps the clock is not shown.
+stays available. The clock appears at the top left of the bars. During switch
+gaps the clock is not shown.
 
 ## Start
 
