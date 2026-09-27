@@ -1,5 +1,6 @@
 #!/bin/sh
 set -eu
+export TZ="${TZ:-Asia/Bangkok}"
 
 SIZE="${VIDEO_SIZE:-1280x720}"
 SIZE_COLON="$(printf '%s' "$SIZE" | tr 'x' ':')"
@@ -81,8 +82,25 @@ start_media() {
   worker_pid=$!
 }
 
+start_fallback() {
+  echo "Starting clocked fallback"
+  clock_filter="drawtext=fontfile=/usr/share/fonts/dejavu/DejaVuSansMono.ttf:text='%{localtime}':fontcolor=white:fontsize=${CLOCK_FONT_SIZE:-40}:x=(w-text_w)/2:y=h-text_h-32:box=1:boxcolor=black@0.75:boxborderw=12"
+  ffmpeg -hide_banner -loglevel warning \
+    -re -f lavfi -i "smptebars=size=${SIZE}:rate=${FPS}" \
+    -re -f lavfi -i "anullsrc=channel_layout=stereo:sample_rate=${AUDIO_RATE:-48000}" \
+    -vf "$clock_filter" -map 0:v:0 -map 1:a:0 \
+    -c:v libx264 -preset "${X264_PRESET:-veryfast}" -profile:v high -pix_fmt yuv420p \
+    -r "$FPS" -g "$GOP" -keyint_min "$GOP" -sc_threshold 0 \
+    -b:v "${VIDEO_BITRATE:-4500k}" -maxrate "${VIDEO_MAXRATE:-4500k}" -bufsize "${VIDEO_BUFSIZE:-9000k}" \
+    -c:a aac -b:a "${AUDIO_BITRATE:-160k}" -ar "${AUDIO_RATE:-48000}" -ac "${AUDIO_CHANNELS:-2}" \
+    -flvflags no_duration_filesize -f flv "$OUTPUT_URL" &
+  worker_pid=$!
+}
+
 start_source() {
-  if [ "$active_source" = "$MEDIA_URL" ]; then
+  if [ "$active_source" = "fallback" ]; then
+    start_fallback
+  elif [ "$active_source" = "$MEDIA_URL" ]; then
     start_media
   else
     start_live "$active_source"
@@ -98,7 +116,7 @@ while true; do
   esac
   [ "$ready_checks" -gt "$LIVE_CONFIRMATIONS" ] && ready_checks="$LIVE_CONFIRMATIONS"
 
-  next_source=""
+  next_source="fallback"
   if [ "$ready_checks" -ge "$LIVE_CONFIRMATIONS" ]; then next_source="$INPUT_URL";
   elif [ "$(cat "$PLAYBACK_FLAG" 2>/dev/null || echo on)" = "on" ] && [ -s "$PLAYLIST_FILE" ]; then next_source="$MEDIA_URL"; fi
 

@@ -1,15 +1,19 @@
 # Always-on RTMP output with RTMP/SRT input and bars fallback
 
 This stack accepts one live input and permanently publishes a `program` RTMP
-path. It shows a looping SMPTE colour-bar clip with silent stereo AAC whenever
-the input is not present. When an input appears it becomes the program
-automatically.
+path. When neither live input nor playlist playback is active, it shows SMPTE
+colour bars with the current date and time plus silent stereo AAC. A live input
+automatically takes priority over playlist playback and fallback bars.
 
-The important part is the codec contract: the bar clip and live input are
+The important part is the codec contract: the bars and live input are
 encoded with the same fixed settings. MediaMTX then switches between them
 internally, without re-encoding and without disconnecting RTMP readers. This
 avoids needing the incoming encoder to match the fallback file's codec, rate,
 or audio layout.
+
+The switcher generates the clocked bars in real time. A short, static bar clip
+remains in MediaMTX to cover switch gaps or a stopped switcher, so the output
+stays available. During those gaps the clock is not shown.
 
 ## Start
 
@@ -19,8 +23,8 @@ or audio layout.
 
    `rtmp://YOUR_SERVER_IP:1935/program`
 
-At first this is bars. The first startup can take a few seconds while Docker
-builds the bar clip and starts the services.
+At first this is clocked bars. The first startup can take a few seconds while
+Docker builds the static backup clip and starts the services.
 
 ## Send a live input
 
@@ -62,6 +66,9 @@ Defaults live in `.env` and are deliberately shared by bars and live:
 
 Change `.env` and restart the stack to use another format. Keep the settings
 fixed while it is on air; changing them requires a final-encoder restart.
+The fallback clock uses `TZ=Asia/Bangkok` by default. Set `TZ` in `.env` to
+another IANA timezone and restart the switcher to change it. Set
+`CLOCK_FONT_SIZE` there to adjust the clock text size.
 
 ## Stream the program to YouTube
 
